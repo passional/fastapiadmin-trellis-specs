@@ -9,7 +9,9 @@ in `frontend/web/tsconfig.json`. App extends strict Vue/uni-app settings in
 `tsconfig.json`. Use the configured `@/` and package-specific aliases rather
 than fragile relative paths across feature roots.
 
-Run each package's `type-check` after changes. Do not weaken strictness or add a
+Run each package's type check after changes. For Web, `pnpm ts:check`
+(`vue-tsc --noEmit --skipLibCheck`) is the canonical command; `pnpm type-check`
+runs without `--skipLibCheck` and is stricter. Do not weaken strictness or add a
 broad ambient declaration to hide a local error.
 
 ## API and feature types

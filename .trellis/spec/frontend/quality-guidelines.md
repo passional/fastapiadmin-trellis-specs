@@ -7,10 +7,16 @@ Run commands from the package being changed.
 Admin Web (`frontend/web/`):
 
 ```bash
-pnpm type-check
+pnpm ts:check
 pnpm test
 pnpm build
 ```
+
+`pnpm ts:check` (`vue-tsc --noEmit --skipLibCheck`) is the canonical type check
+for Web changes. A separate `pnpm type-check` (`vue-tsc --noEmit`, no
+`--skipLibCheck`) also exists and is stricter; both are valid, but prefer
+`ts:check` for routine work and reach for `type-check` when dependency type
+errors are in scope.
 
 `pnpm lint` runs ESLint with `--fix`, Prettier with `--write`, and Stylelint with
 `--fix`; it mutates files. Use it when formatting/lint fixes are in scope and
@@ -50,11 +56,21 @@ while App extends `@commitlint/config-conventional`.
 ## Tests and evidence
 
 Web uses Vitest + jsdom and Vue Test Utils; tests match
-`src/**/*.{test,spec}.{ts,js}`. The existing
-`frontend/web/src/__tests__/smoke.spec.ts` verifies importable runtime enums but
-is intentionally small. Add focused tests for pure transformations, routing,
-stores, composables, HTTP retry/error behavior, or components when changing
-those contracts.
+`src/**/*.{test,spec}.{ts,js}`. There are two current test files:
+
+- `frontend/web/src/__tests__/smoke.spec.ts` verifies importable runtime enums
+  and is intentionally small.
+- `frontend/web/src/__tests__/route-invariants.spec.ts` is the executable
+  contract for the route-cache design: it asserts that records with children have
+  no `component` (the depth-skip precondition), that the `Dashboard`/`Fastlink`
+  directories stay component-less, and that backend catalog nodes do not
+  configure `component_path`. It reads `backend/sql/sys_menu.json`, so it depends
+  on the repo layout.
+
+Run `pnpm test` after touching routing, the app layout, or the worktab store; see
+[Routing and Caching](./routing-and-caching.md). Add focused tests for pure
+transformations, routing, stores, composables, HTTP retry/error behavior, or
+components when changing those contracts.
 
 App currently has no package test script. Type-check, lint, target builds, and
 manual platform verification are the available gate; do not claim automated

@@ -16,5 +16,5 @@ patterns. `backend/README.md` is useful supporting documentation; source and
 | [Quality Guidelines](./quality-guidelines.md) | Ruff, pytest, review expectations, and verification |
 
 Read all five guides for a new backend feature. The concrete reference slice is
-`backend/app/api/v1/module_system/dept/`; the dynamically discovered plugin
+`backend/app/modules/system/dept/`; the dynamically discovered plugin
 example is `backend/app/plugin/module_example/demo/`.

@@ -6,8 +6,8 @@ coverage.
 
 | Spec | Covers |
 |---|---|
-| [Backend Testing](./backend-testing.md) | pytest configuration, TestClient/async patterns, SQLite and Redis fixtures, isolation, and behavior assertions |
-| [Frontend Testing](./frontend-testing.md) | Admin Web Vitest/jsdom patterns and the App's current no-runner state |
+| [Backend Testing](./backend-testing.md) | pytest configuration, TestClient/async patterns, SQLite and Redis fixtures, isolation, the `test_migrations.py` drift guard, and behavior assertions |
+| [Frontend Testing](./frontend-testing.md) | Admin Web Vitest/jsdom patterns, `route-invariants.spec.ts` as the routing contract, the App's current no-runner state, and built-artifact (dist) verification |
 | [Contract and Deployment Testing](./contract-and-deployment-testing.md) | REST/auth/realtime contracts, generator regressions, Docker/Nginx/config smoke checks |
 
 Select tests by changed boundary, then run the package's existing commands

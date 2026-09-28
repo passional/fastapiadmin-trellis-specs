@@ -21,7 +21,7 @@ Reference owners:
   `frontend/app/src/http/adapters/alova.ts`
 - Shared backend response contract: `backend/app/common/response.py`
 - Code generator templates and path mapping: `backend/templates/` and
-  `backend/app/api/v1/module_generator/gencode/jinja2_template_util.py`
+  `backend/app/modules/generator/gencode/jinja2_template_util.py`
 - Runtime configuration: `backend/app/config/setting.py`, `backend/env/`, and
   `docker/docker-compose.yaml`
 

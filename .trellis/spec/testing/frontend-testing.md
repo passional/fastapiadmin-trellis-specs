@@ -3,19 +3,39 @@
 ## 1. Admin Web
 
 `frontend/web/` uses Vitest 4, jsdom, `@vitejs/plugin-vue`, and Vue Test Utils.
-`vitest.config.ts` includes `src/**/*.{test,spec}.{ts,js}` and maps `@`,
-`@utils`, and `@stores`. Run from `frontend/web/`:
+`vitest.config.ts` includes `src/**/*.{test,spec}.{ts,js}` and maps the full
+alias set used by `vite.config.ts`: `@`, `@views`, `@imgs`, `@icons`, `@utils`,
+`@stores`, `@plugins`, `@styles`, `@api`, `@fa_imgs`. Run from `frontend/web/`:
 
 ```bash
-pnpm test
-pnpm type-check
-pnpm build
+pnpm test        # vitest run
+pnpm ts:check    # vue-tsc --noEmit --skipLibCheck (canonical type gate)
+pnpm lint
+pnpm build:prod
 ```
 
-The only current test file is `src/__tests__/smoke.spec.ts`; it dynamically
-imports `MenuTypeEnum` and code-generator enum modules. It proves those runtime
-modules load and selected enum values match, not component, router, store, HTTP,
-auth, accessibility, or user-flow coverage.
+`pnpm type-check` (`vue-tsc --noEmit`) also exists but omits `--skipLibCheck`;
+`ts:check` is the SKILL-prescribed canonical command. Use it when reporting a
+type gate.
+
+Two test files currently exist:
+
+- `src/__tests__/smoke.spec.ts` (small) dynamically imports `MenuTypeEnum` and
+  the code-generator enum modules. It proves those runtime modules load and
+  selected enum values match — nothing more.
+- `src/__tests__/route-invariants.spec.ts` (added in the Sept router refactor)
+  is the canonical executable contract for the routing/KeepAlive invariants
+  described in `frontend/routing-and-caching.md`. It asserts:
+  - global single-layer `KeepAlive`: static directory routes with children must
+    keep `component: undefined`, so Vue Router's depth-skip renders the leaf;
+  - the multi-level `Dashboard` / `Fastlink` directories stay component-less
+    (regression anchor for the removed `NestedRouterParent` shell);
+  - every leaf record is renderable (`component` / `link` / `iframe`);
+  - `backend/sql/sys_menu.json` directory nodes (`type=CATALOG`) and any node
+    with non-button children must not carry `component_path`.
+
+Neither file covers component, store, HTTP, auth, accessibility, or user-flow
+behavior. The router invariants are the exception: that area **is** covered.
 
 Use Vitest according to the owner:
 
@@ -30,7 +50,8 @@ Use Vitest according to the owner:
   events, loading/empty/error/permission variants, cleanup, and accessible
   interaction rather than internal refs.
 - Router/menu: assert exact backend component/menu path mapping, unknown routes,
-  and permission-driven visibility. UI hiding is not backend authorization.
+  directory-no-component, and permission-driven visibility. UI hiding is not
+  backend authorization.
 
 Do not snapshot entire generated pages or large Element Plus DOM trees. Assert
 stable contracts and user-visible behavior. Reset fake timers, mocks, global
@@ -82,8 +103,46 @@ For a shared backend change, keep Web and App expectations separate:
 | Pagination | `items`, `total`, `page_no`, `page_size`, `has_next` | Current ambient `list` mismatch must be adapted/fixed, not copied silently |
 | Access auth | Axios injects Bearer token | Alova injects Bearer token unless `ignoreAuth` |
 | Refresh body | JSON string in current Web/backend contract | Current App object body is a known failing mismatch |
-| Realtime | Browser WebSocket behavior | uni-app socket API/platform behavior |
+| Realtime | Browser WebSocket / `EventSource` (SSE) behavior | uni-app socket API/platform behavior |
 
 Type-check success is necessary but does not prove runtime envelope, storage,
 retry, upload, or realtime behavior.
 
+## 4. Built-artifact (dist) verification
+
+The deployment chain serves built artifacts, not `src/`. There are four dist
+output locations (all gitignored, so a fresh checkout has none of them), and the
+same build must be synced between the web-serving copies:
+
+| Artifact | Produced by | Served / consumed |
+|---|---|---|
+| `frontend/web/dist` | `pnpm build:prod` | canonical build output |
+| `docker/nginx/web/dist` | `rsync -a --delete` from `frontend/web/dist` | Nginx `/web` alias `/usr/share/nginx/html/web/dist` |
+| `backend/dist` | `rsync -a --delete` from `frontend/web/dist` | `path_conf.FRONTEND_DIST_DIR`, mounted by `register_frontend` (`app/__init__.py`) |
+| `docker/nginx/app/dist/build/h5` | `pnpm build:h5` in `frontend/app` | Nginx `/app` alias |
+
+Procedure after a frontend change that ships to deployment:
+
+1. rebuild (`pnpm build:prod`),
+2. `rsync -a --delete` the output into `docker/nginx/web/dist` and
+   `backend/dist`,
+3. verify at the **artifact** level, not just `src/`.
+
+Minification drops function names and comments, but property accesses and
+message strings survive, so grep the bundle for feature strings and invariants:
+
+```bash
+# locate the chunk that owns a feature
+grep -l "ai/chat/ws" docker/nginx/web/dist/js/*.js
+# confirm the WebSocket guard uses !== WebSocket.CLOSED (not only === OPEN)
+grep -oE '.{0,60}readyState.{0,60}' docker/nginx/web/dist/js/<chunk> | grep -i websocket
+```
+
+Rule: **"source fixed" ≠ "deployment fixed"**. When feedback says a fix is
+"still broken in production", grep the dist artifacts for the feature string
+first, then go to source. Docker deployments additionally need the image
+rebuilt and re-transferred — the running container serves the baked-in copy.
+
+This is the verification contract; the surrounding topology and the
+`register_frontend` same-path pitfall are documented in
+`operations/deployment-topology.md`.

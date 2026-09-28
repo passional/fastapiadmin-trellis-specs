@@ -18,9 +18,24 @@ authoritative; parts of `frontend/docs/src/guide/` describe older layouts.
 | [Directory Structure](./directory-structure.md) | Web, App, Docs, and feature placement |
 | [Component Guidelines](./component-guidelines.md) | Vue SFC contracts, UI systems, styling, and platform behavior |
 | [Hook Guidelines](./hook-guidelines.md) | Web hooks, App composables, lifecycle, and async ownership |
+| [Routing and Caching](./routing-and-caching.md) | Web route pipeline, deep-skip rendering, KeepAlive cache invariants, connection cleanup |
 | [State Management](./state-management.md) | Pinia, persistence, local state, and server state |
 | [Type Safety](./type-safety.md) | Strict TypeScript, API types, globals, and generated declarations |
 | [Quality Guidelines](./quality-guidelines.md) | Package-specific lint, type, test, build, and review checks |
 
 For a cross-client feature, read the full guide set and verify the Web and App
 implementations independently.
+
+## Pre-development checklist
+
+- Adding or renaming a routed Web page: configure `route_path` / `route_name` /
+  `component_path` / `keep_alive` in the backend menu, make
+  `defineOptions({ name })` equal the menu `route_name`, and keep directories
+  component-less. Read [Routing and Caching](./routing-and-caching.md).
+- Touching the router, `layouts/fa-page-content/index.vue`, or
+  `store/modules/worktab.store.ts`: run `pnpm test` in `frontend/web` — the
+  `route-invariants.spec.ts` contract must stay green.
+- Building an app-wide connection/timer page: implement
+  `onActivated`/`onDeactivated` and the WebSocket handshake guard.
+- Changing a Web page lifecycle, store persistence, or type contract: run
+  `pnpm ts:check`, `pnpm lint`, and `pnpm test` in the owning package.

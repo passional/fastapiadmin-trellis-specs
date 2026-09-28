@@ -27,11 +27,11 @@ and streaming endpoints are explicit exceptions.
 Public HTTP URLs are built as:
 
 ```text
-{origin}{VITE_APP_BASE_API}{area prefix}{feature prefix}{endpoint}
+{origin}{VITE_APP_BASE_API}{domain prefix}{feature prefix}{endpoint}
 ```
 
 Both frontend envs use `VITE_APP_BASE_API=/api/v1`. Backend routers themselves
-are registered without that prefix (`/system/auth`, `/common/health`, etc.).
+are registered without that prefix (`/system/auth`, `/monitor/health`, etc.).
 `Settings.ROOT_PATH` describes the external mount for OpenAPI/ASGI scope; it
 does not register a second set of `/api/v1/...` routes. The reverse proxy or
 ASGI server must therefore make the public prefix and backend path agree.
@@ -66,24 +66,33 @@ and `frontend/app/src/http/adapters/alova.ts`.
 
 | Channel | Client input | Server output | Authentication / lifecycle |
 |---|---|---|---|
-| AI chat `/ai/chat/ws` | JSON `{message, session_id?, files?}` or `{action:"stop", session_id?}` | text chunks; `[DONE]`; intended `[STOPPED]`; plain-text validation/error messages | Server supports subprotocols `access_token` and `access_token.<jwt>`; current Web and App clients use query `?token=` |
-| System chat `/system/chat/ws` | `ping` only; message mutation remains REST | `pong` or JSON `{type:"message",data}`, `{type:"read",...}`, `{type:"presence",...}` | query `?token=`; server requests close `4001` before accepting an invalid handshake; Web stops reconnecting only if it observes `4001` |
-| Storage transfer `/storage/transfer/ws` | `ping` only | `pong` or JSON `{type:"task_update",data:{...}}` | query `?token=`; server requests close `4001` before accepting an invalid handshake; no frontend consumer is currently present |
-| Health SSE `/common/health/stream` | GET stream | event `health`, immediately then every 30 seconds | ordinary HTTP route; payload contains dependency status, disk, uptime, timestamp |
+| AI chat `/ai/chat/ws` | JSON `{message, session_id?, files?}` or `{action:"stop", session_id?}` | text chunks; `[DONE]`; intended `[STOPPED]`; plain-text validation/error messages | Web uses `Sec-WebSocket-Protocol` carrier `["access_token", "access_token."+jwt]`; App still uses `?token=` query fallback. Handshake auth via `websocket_authenticate`; invalid token closes `4001`, insufficient chat permission closes `4003` |
+| Storage transfer `/task/storage/transfer/stream` | GET SSE stream | event frames with `{type:"task_update",data:{...}}` | ordinary authenticated HTTP route (`EventSourceResponse`); frontend consumer is `frontend/web/src/api/module_storage/transfer.ts` via `createSSEClient` (`@utils/sse`) |
+| Health SSE `/monitor/health/stream` | GET SSE stream | event `health`, immediately then every 30 seconds | ordinary HTTP route; payload contains dependency status, disk, uptime, timestamp |
+| Health check `/monitor/health/check` | GET | envelope with DB/Redis live status | ordinary HTTP route; used by the Docker compose healthcheck |
+
+There is no `/system/chat/ws` channel anymore; internal chat was collapsed into
+the AI chat module. There is no `/common/health/*` path and no `/live` or
+`/ready` probe.
 
 Executable owners are
-`backend/app/api/v1/module_ai/chat/controller.py`,
-`backend/app/api/v1/module_system/chat/{controller.py,service.py,ws_manager.py}`,
-`backend/app/api/v1/module_storage/transfer/{controller.py,engine.py,ws_manager.py}`,
-and `backend/app/api/v1/module_common/health/controller.py`.
+`backend/app/modules/ai/chat/controller.py`,
+`backend/app/modules/task/storage/transfer/controller.py` (with
+`transfer/sse_manager.py` and `backend/app/core/sse_manager.py`), and
+`backend/app/modules/monitor/health/controller.py`.
 
-Client examples are `frontend/app/src/composables/useAiChat.ts` and
-`frontend/web/src/api/module_system/chat.ts`. The AI server supports the
-subprotocol form so browser clients can keep JWTs out of URLs/access logs, but
-`frontend/web/src/views/module_ai/chat/index.vue` and the App composable both
-currently use the supported query fallback. Do not describe the safer carrier
-as deployed until the Web client is changed and tested; uni-app cannot rely on
-the browser WebSocket subprotocol API.
+`get_websocket_token` reads the token from the `Sec-WebSocket-Protocol` header
+(`"access_token.<jwt>"`) and echoes the subprotocol on `accept`; clients that
+cannot set custom subprotocols (uni-app) may still pass `?token=`. The Web
+client `frontend/web/src/views/module_ai/chat/index.vue` uses the subprotocol
+carrier; the App composable `frontend/app/src/composables/useAiChat.ts` uses the
+query fallback.
+
+`VITE_APP_WS_ENDPOINT` is shared: the AI WebSocket uses it
+(`frontend/web/src/views/module_ai/chat/index.vue`) **and** the SSE consumers
+use it (`frontend/web/src/api/module_monitor/dashboard.ts` and
+`frontend/web/src/api/module_storage/transfer.ts`). Changing it affects all
+three.
 
 ### Current AI stop limitation
 
@@ -107,7 +116,8 @@ intended branch until receiving and generation are coordinated concurrently.
 | Malformed AI JSON/schema | Connection remains open; error text is sent |
 | `stop` sent while AI generation is active | Not read until generation completes; current concurrency gap |
 | `stop` while idle | Plain text "当前没有正在进行的生成任务" |
-| Invalid system-chat/transfer token | Server calls `close(4001)` before `accept()`; observable browser close code/reconnect behavior needs a handshake test |
+| AI WebSocket token invalid | Server calls `close(4001)` before `accept()` |
+| AI WebSocket token valid but lacking chat permission | Server calls `close(4003)` before `accept()` |
 | Unknown pushed JSON kind | Current clients ignore or must narrow it; add the type union before emitting a new kind |
 
 ## 5. Good / Base / Bad Cases
@@ -118,7 +128,8 @@ intended branch until receiving and generation are coordinated concurrently.
 - Base: a Web-only endpoint updates the backend and Web wrapper while leaving
   App untouched after confirming it has no consumer.
 - Bad: returning a raw dict from a normal controller, changing `items` to
-  `list` for one client, or treating all WebSocket channels as one protocol.
+  `list` for one client, treating all realtime channels as one protocol, or
+  assuming the `/system/chat/ws` channel still exists.
 
 ## 6. Tests Required
 
@@ -128,10 +139,12 @@ intended branch until receiving and generation are coordinated concurrently.
   wrapper's `.data.data` consumer.
 - App: run type-check and assert Alova returns business `data`, including 401
   refresh and non-zero business code behavior.
-- WebSocket: test authenticated and rejected handshakes, the client-observed
-  close code, malformed input, heartbeat, terminal/close behavior, and every
-  new push discriminant. An AI stop test must prove the server observes `stop`
-  before the stream naturally completes.
+- WebSocket: test authenticated and rejected handshakes (both `4001` and
+  `4003`), the client-observed close code, malformed input, heartbeat,
+  terminal/close behavior, and every new push discriminant. An AI stop test
+  must prove the server observes `stop` before the stream naturally completes.
+- SSE: assert the transfer and health streams emit the documented frames and
+  survive reconnect.
 - Proxy-sensitive changes: test both direct backend paths and public
   `/api/v1/...` paths through Nginx.
 

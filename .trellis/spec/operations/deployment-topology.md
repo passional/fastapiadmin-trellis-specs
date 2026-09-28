@@ -3,8 +3,8 @@
 ## 1. Scope / Trigger
 
 Use this contract for Docker images, Compose services, Nginx routes, frontend
-artifacts, public URL prefixes, health checks, WebSockets, replicas, deploy
-scripts, or production rollout changes.
+artifacts (`dist`), public URL prefixes, health checks, realtime streams,
+replicas, deploy scripts, or production rollout changes.
 
 ## 2. Signatures and topology
 
@@ -20,75 +20,113 @@ backend -> MySQL + Redis
 Evidence: `docker/docker-compose.yaml`, `docker/nginx/nginx.conf`,
 `frontend/web/vite.config.ts`, and `frontend/app/vite.config.ts`.
 
-Expected probe semantics from
-`backend/app/api/v1/module_common/health/controller.py`:
+Backend health routes (`backend/app/modules/monitor/health/controller.py`):
 
-| Direct backend route | Meaning | Healthy status |
+| Public route | Meaning | Healthy status |
 |---|---|---|
-| `/common/health/live` | Process is alive | 200 |
-| `/common/health/ready` | DB and Redis are ready | 200; otherwise 503 |
-| `/common/health/check` | Basic status/version/uptime | 200 |
+| `/api/v1/monitor/health/check` | Real-time DB/Redis connectivity + version/uptime | 200 |
+| `/api/v1/monitor/health/stream` | SSE frame every 30s with DB/Redis status | 200 |
 
-The public form must be verified through the configured `/api/v1` proxy.
+Only these two routes exist: there is no liveness/readiness split and no health
+endpoints outside the `/monitor` domain. Compose's backend healthcheck already
+probes
+`http://localhost:8001/api/v1/monitor/health/check` with
+`X-Forwarded-Proto: https` (`docker/docker-compose.yaml:138-147`).
 
 ## 3. Contracts and current gaps
 
 ### Backend image/source contract
 
-`docker/backend/Dockerfile` copies only `requirements.txt`; it does not copy
-`backend/main.py` or `backend/app/`. The Compose bind mount
-`../backend:/home` is therefore required for the current image to run. The
-README advice to remove that mount for production is not executable until the
-Dockerfile copies application source (and the resulting immutable image is
-tested).
+`docker/backend/Dockerfile` installs `requirements.txt`, then does
+`COPY ./backend/ .`, so the image ships `main.py` and `app/` itself. The Compose
+backend bind mount `../backend:/home` is **commented out**
+(`docker/docker-compose.yaml:122-130`); only the upload directory
+`./backend/static/upload:/home/static/upload` is mounted, to persist user files.
+Removing the commented mount is safe — it exists only as an optional dev
+hot-reload convenience, and production runs the image's own source.
 
-Do not remove the mount as an isolated hardening change. Either preserve the
-current source-mounted deployment or first implement and verify a complete
-image artifact.
-
-### Frontend artifacts and deploy script
+### Frontend artifacts, dist sync, and deploy script
 
 Nginx mounts `docker/nginx/{web,app,docs}` and expects built `dist` content.
-The checked-in `deploy.sh` builds only Docker images; it has no frontend build
-function and does not parse `--build-frontend`/`--skip-frontend`. The Docker
-README describes those flags and `BUILD_WEB`, but `docker/.env.example` and the
-script do not implement them. Build and copy frontend artifacts explicitly, or
-add one tested implementation before documenting automatic builds.
+All `dist` directories are generated artifacts, gitignored, and absent in a
+fresh checkout (`.gitignore` ignores `dist`, `docker/nginx/{web,app,docs}/dist`).
+The deployment chain has three web artifact locations plus the App H5 build:
+
+| Artifact | Serving entry |
+|---|---|
+| `frontend/web/dist` | `pnpm build:prod` output (`vite.config.ts` `outDir: "dist"`) |
+| `docker/nginx/web/dist` | docker `/web` (`nginx.conf:103-106`, `alias /usr/share/nginx/html/web/dist`) |
+| `backend/dist` | integrated hosting via `app.frontend("/")` (`path_conf.FRONTEND_DIST_DIR`, `backend/app/__init__.py:125-129`) |
+| `docker/nginx/app/dist/build/h5` | docker `/app` (`nginx.conf:110-113`) |
+
+Build once and sync with `--delete` (minified chunk filenames carry a content
+hash; without `--delete` stale chunks linger):
+
+```bash
+cd frontend/web && pnpm build:prod
+cd ../.. && rsync -a --delete frontend/web/dist/ docker/nginx/web/dist/ \
+              && rsync -a --delete frontend/web/dist/ backend/dist/
+```
+
+Verify the **built artifact**, not only `src/` (function names/comments are lost
+to minify, but property accesses like `WebSocket.CLOSED` and message strings
+survive):
+
+```bash
+grep -l "ai/chat/ws" docker/nginx/web/dist/js/*.js
+grep -oE '.{0,60}readyState.{0,60}' <chunk> | grep -i websocket
+```
+
+`register_frontend` pitfall: the existence check and the `app.frontend()` mount
+must use the same `path_conf.FRONTEND_DIST_DIR`. It mounts with
+`check_dir=False`, so a mismatch fails only on the **first request**, and the
+error surfaces only in `backend/logs/fastapiadmin.log`.
+
+The checked-in `deploy.sh` (repo root) builds Docker images only; it has no
+frontend build function and does not parse `--build-frontend`/`--skip-frontend`.
+The Docker README describes those flags and `BUILD_WEB`, but neither
+`docker/.env.example` nor the script implements them. Build and copy frontend
+artifacts explicitly, or add one tested implementation before documenting
+automatic builds. Neither a Windows batch deploy script nor a nested
+`docker/deploy.sh` exists; only the repo-root script does.
 
 ### Public path/probe gaps
 
-- Compose probes `/common/health`, but the backend exposes `/check`, `/live`,
-  and `/ready` below `/common/health`; there is no bare health handler.
-- Backend tests call direct paths without `/api/v1`, while Nginx proxies the
-  unmodified `/api/v1` URI and backend uses `ROOT_PATH=/api/v1`. This boundary
-  lacks an integration test; verify it instead of assuming prefix stripping.
-- Nginx `/` serves VitePress and `/docs` is therefore a docs-site path, while
-  the backend also registers Swagger at direct `/docs`. Docker README claims
-  `/docs` is Swagger. Treat public documentation URLs as unresolved until the
+- Nginx now **applies** rate limiting: `location /api/v1` uses
+  `limit_req zone=api_limit burst=60 nodelay;` and `limit_conn conn_limit 100;`
+  (`docker/nginx/nginx.conf:116-118`), on top of the declared
+  `api_limit`/`conn_limit` zones.
+- Nginx `/` serves the docs site (`root /usr/share/nginx/html/docs/dist`); the
+  backend also registers Swagger at direct `/docs`. Docker README claims `/docs`
+  is Swagger. Treat public documentation URLs as unresolved until the
   reverse-proxy routes are made explicit and tested.
 - `NGINX_SERVER_NAME` is documented as an env variable, but
-  `docker/nginx/nginx.conf` hard-codes `service.fastapiadmin.com` and Compose
-  does not template it.
+  `docker/nginx/nginx.conf` hard-codes `service.fastapiadmin.com` in both server
+  blocks and Compose does not template it.
 
 These are known deployment mismatches, not preferred conventions.
 
 ### Realtime and replica safety
 
-System-chat and storage-transfer WebSocket managers keep
-`user_id -> set[WebSocket]` in process memory. Transfer cancellation also uses
-an in-process registry. Evidence:
-`backend/app/api/v1/module_system/chat/ws_manager.py`,
-`backend/app/api/v1/module_storage/transfer/ws_manager.py`, and
-`backend/app/api/v1/module_storage/transfer/registry.py`.
+Storage-transfer progress is now **SSE**, not WebSocket:
+`GET /api/v1/task/storage/transfer/stream` (`response_class=EventSourceResponse`),
+served by `backend/app/modules/task/storage/transfer/{controller,sse_manager}.py`
+with the shared core helper `backend/app/core/sse_manager.py`. The legacy
+system-chat channel is gone and the WebSocket manager was replaced by
+`backend/app/core/sse_manager.py`; reference the SSE manager only. The frontend
+consumer is
+`frontend/web/src/api/module_storage/transfer.ts` via `createSSEClient`
+(`@utils/sse`); health SSE uses `backend/app/modules/monitor/health/controller.py`.
 
+SSE connection state and transfer cancellation remain in-process registries.
 APScheduler starts inside every application process, although its default
 jobstore is Redis (`backend/app/core/ap_scheduler.py`). Starting multiple
 backend replicas can duplicate scheduler listeners/system job execution and
-split WebSocket presence/pushes. Deploy one backend process/replica unless a
+split SSE presence/pushes. Deploy one backend process/replica unless a
 coordinated pub/sub, distributed connection/cancellation model, and scheduler
 leader/worker design is implemented and tested.
 
-The split WebSocket state follows directly from the process-local dictionaries.
+The split realtime state follows directly from the process-local registries.
 Duplicate scheduler execution is an operational inference from starting an
 independent scheduler in every process against a shared job store; the
 repository has no multi-process test proving safe coordination. Keep that
@@ -96,67 +134,73 @@ distinction explicit when evaluating a future replica design.
 
 ### Operational safety
 
-Compose exposes MySQL and Redis host ports by default and mounts mutable source
-into the backend. Restrict these in production deliberately. Docker JSON logs
-rotate at 10 MB x 3 files per service, while application file logs also rotate
-daily under `backend/logs/`.
+Compose exposes MySQL and Redis host ports by default. Restrict these in
+production deliberately. Docker JSON logs rotate at 10 MB x 3 files per service,
+while application file logs also rotate daily under `backend/logs/`.
 
-`deploy.sh` calls `docker system prune -a -f` during a full deploy and through
-`clean`; this removes unused Docker resources host-wide, not only this project.
-Do not run it on a shared host without accepting that scope.
+`deploy.sh` cleanup runs only `docker image prune -f` and
+`docker builder prune -f` (`deploy.sh:116-121`), with an explicit comment
+rejecting `-a` because it would delete other projects' unused images on a shared
+host. The script no longer git-pulls; it expects code to be uploaded, loads
+`docker/.env`, and uses `PROJECT_NAME="FastapiAdmin"`.
 
 ## 4. Validation & Error Matrix
 
 | Condition | Operational result / required response |
 |---|---|
 | Required MySQL/Redis password absent | Compose interpolation fails (`:?`) |
-| Backend bind mount removed with current image | `main.py`/application source is absent |
-| Bare `/common/health` probe | 404; container cannot become healthy |
-| DB/Redis down | `/ready` returns 503; `/live` should remain 200 |
-| Missing frontend `dist` | Nginx serves missing/404 content |
+| Backend bind mount absent | Normal: image ships source via `COPY ./backend/ .` |
+| `/api/v1/monitor/health/check` probe | 200 when DB and Redis are reachable, else 503-equivalent body |
+| DB/Redis down | `/monitor/health/check` reports `redis_status`/`db_status` != 1 |
+| Missing frontend `dist` | Nginx / `register_frontend` serve missing/404 content |
 | Missing TLS files | Nginx config/start fails |
 | Public prefix not stripped/matched | `/api/v1/...` requests return 404 |
-| Multiple backend replicas | Presence, pushes, cancellation, and scheduler behavior diverge/duplicate |
-| Query-string WebSocket JWT | Token can appear in proxy/access logs; use AI subprotocol where the client supports it |
+| Multiple backend replicas | SSE presence/cancellation and scheduler behavior diverge/duplicate |
+| Query-string WebSocket JWT | Token can appear in proxy/access logs; Web uses the AI subprotocol, App still uses `?token=` |
 
 ## 5. Good / Base / Bad Cases
 
-- Good: build immutable backend and frontend artifacts, run migration as an
-  explicit release step, start one backend replica, verify live/ready plus REST
-  and WebSocket paths through Nginx, and retain rollback artifacts.
-- Base: use the current source-mounted single-instance Compose deployment after
-  fixing/overriding the health probe and supplying prebuilt static assets.
-- Bad: remove the backend mount because the README says to, trust unimplemented
-  frontend build flags, or scale replicas without realtime/scheduler design.
+- Good: build immutable backend and frontend artifacts, sync `dist` with
+  `--delete`, start one backend replica, verify health/check plus REST and SSE
+  paths through Nginx, and retain rollback artifacts.
+- Base: use the current single-instance Compose deployment and supply prebuilt
+  static assets.
+- Bad: trust unimplemented frontend build flags, ship un-synced `dist`
+  directories, skip `--delete` on the artifact sync, or scale replicas without
+  realtime/scheduler design.
 
 ## 6. Tests Required
 
 - `docker compose --env-file .env config` with required variables supplied; no
   secrets in committed output.
-- Build the backend image, inspect that the chosen source strategy provides
-  `/home/main.py`, and run the container without relying on an undocumented
-  host state.
-- Run `nginx -t`; verify `/web`, `/app` (if enabled), docs, REST, SSE, and each
-  WebSocket upgrade through the public origin.
-- Probe direct `/common/health/live` and `/ready`, then their public equivalents;
-  simulate DB and Redis failure and assert live/ready divergence.
-- Apply Alembic upgrade before application startup in a production-like test.
+- Build the backend image and run the container without a host source mount;
+  confirm `/home/main.py` and `app/` come from the image.
+- Run `nginx -t`; verify `/web`, `/app` (if enabled), docs, REST, and SSE through
+  the public origin.
+- Probe `/api/v1/monitor/health/check` and `/api/v1/monitor/health/stream`;
+  simulate DB and Redis failure and assert status reporting.
+- Assert `backend/dist` and `docker/nginx/web/dist` match `frontend/web/dist`
+  after sync (e.g. compare hashed chunk names) and that a feature string
+  (e.g. `ai/chat/ws`) is present in the built artifact.
 - Assert a single backend process or add distributed tests before increasing
   replicas.
 
 ## 7. Wrong vs Correct
 
-Wrong with the current Dockerfile:
+Wrong (assuming a removed host mount is the only source provider):
 
 ```yaml
-# Removing the only application-source provider leaves the image incomplete.
+# The image already contains source; a missing ../backend:/home mount is not an error.
 backend:
-  volumes: []
+  volumes:
+    - ./backend/static/upload:/home/static/upload
 ```
 
 Correct current-state decision:
 
 ```text
-Keep ../backend:/home, or first COPY the backend source into the image and prove
-the image boots, migrates, serves health/API/WebSocket traffic, and can roll back.
+Keep the source COPY in docker/backend/Dockerfile. The ../backend:/home mount is
+commented out and optional (dev hot reload only); production runs image-bundled
+source. After any frontend change, rebuild and rsync --delete all three web dist
+targets before re-verifying the deployed artifact.
 ```

@@ -21,7 +21,7 @@ utilities when the caller can receive a meaningful business failure. Set
 `msg`, business `code`, HTTP `status_code`, and optional diagnostic `data` only
 as needed. Examples:
 
-- `backend/app/api/v1/module_system/dept/service.py` rejects duplicate names,
+- `backend/app/modules/system/dept/service.py` rejects duplicate names,
   duplicate codes, empty deletion sets, and deletion of parents with children.
 - `backend/app/core/dependencies.py` uses explicit 401 and 403 exceptions for
   authentication and authorization.
@@ -72,7 +72,7 @@ unexpected exceptions in services.
 
 Put structural constraints in Pydantic schemas (`Field`, `field_validator`,
 `model_validator`) and rules requiring database/domain state in services.
-`backend/app/api/v1/module_system/dept/schema.py` validates shape and codes;
+`backend/app/modules/system/dept/schema.py` validates shape and codes;
 `DeptService` checks uniqueness and tree relationships. Do not duplicate the
 same validation in controllers.
 

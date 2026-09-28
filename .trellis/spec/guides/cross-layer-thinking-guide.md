@@ -49,6 +49,6 @@ boundary.
 
 Read the concrete contracts in `../architecture/`, `../operations/`,
 `../security/`, and `../testing/` before implementation. Current evidence
-includes `backend/app/init_app.py`,
+includes `backend/app/__init__.py` (app factory + lifespan),
 `frontend/web/src/router/route-loader.ts`,
 `frontend/app/src/http/adapters/alova.ts`, and `docker/nginx/nginx.conf`.

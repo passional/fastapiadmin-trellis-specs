@@ -26,19 +26,31 @@ Persistence is opt-in in each store. For example, settings declare a stable
 socket objects, DOM handles, or request promises. Authentication tokens are
 owned by `src/utils/auth`, while `useUserStore` keeps the reactive login/user,
 permissions, route, and lock state synchronized. Logout/reset must clear
-dependent menu, work-tab, router, chat, and credential state as the current
-user store does.
+dependent menu, work-tab, router, dictionary, and credential state as the
+current user store does.
 
 Use `useTable` for page server state. `refreshAppCaches()` is the coordinated
 path for refreshing user/config/notice/dictionary/route caches after changes;
 do not scatter competing application bootstrap refreshes.
+
+`useWorktabStore` (`src/store/modules/worktab.store.ts`) owns the tab list
+(`opened`) and the route-cache eviction channel `keepAliveExclude`. Closing tabs
+pushes the removed tabs' component names into `keepAliveExclude` so the layout's
+`KeepAlive` prunes those instances; `openTab` removes them again via
+`removeKeepAliveExclude`. Logout's `clearAll()` replaces `keepAliveExclude` with
+the names of the dropped tabs (an empty `include` does not prune). Do not "clean
+up" this mechanism when editing the store — without it, cached pages keep their
+WebSockets and timers alive across sessions. See
+[Routing and Caching](./routing-and-caching.md).
 
 ## Uni-app client
 
 `frontend/app/src/main.ts` creates the App's independent Pinia instance. Stores
 in `src/store/` currently use option-store syntax. The custom plugin in
 `src/store/persist.ts` restores state by `$patch` and persists every store by ID
-except `temp` and `theme`.
+except `temp` and `theme`. Note the `temp` exclusion is vestigial: no store has
+the id `temp` (the actual ids are `appConfig`, `appUserInfo`, and `theme`), so
+only `theme` is meaningfully excluded today.
 
 Because persistence is broad by default, keep module-scoped in-flight flags and
 timestamps outside state, as `src/store/configStore.ts` does. Never store

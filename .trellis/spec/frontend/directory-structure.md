@@ -11,22 +11,42 @@ frontend workspace that validates all three.
 ```text
 src/
 ├── api/module_*/           # typed Axios endpoint groups by backend area
+├── assets/                 # bundled static assets
 ├── components/             # reusable Fa* components grouped by UI role
+├── config/                 # app-level configuration
+├── constants/              # shared constant values
+├── directives/             # global directives, incl. permission/ (v-hasPerm)
+├── enums/                  # shared runtime enums
 ├── hooks/core/             # reusable Web composables
 ├── layouts/                # admin shell and layout-local components/hooks
-├── router/                 # routes, dynamic menu loading, guards, refresh
+├── locales/langs/          # i18n entries (zh.json / en.json)
+├── mock/                   # local mock data
+├── plugins/                # single Vue plugin-registration entry
+├── router/                 # static shell + dynamic menu → route pipeline
 ├── store/modules/          # Pinia stores
 ├── styles/                 # global tokens, Element Plus overrides, layouts
 ├── types/                  # cross-feature component/router/store types
 ├── utils/                  # HTTP and other shared helpers
-└── views/module_*/         # routed feature pages and page-local components
+├── views/module_*/         # routed feature pages and page-local components
+├── App.vue                 # root component
+└── main.ts                 # app bootstrap
 ```
+
+The `router/` directory is more than a route list: `routes.ts` is the static
+shell, while `guards.ts` → `MenuProcessor.ts` → `route-loader.ts` is the dynamic
+pipeline (`ComponentLoader` path→component, `RouteTransformer` menu→record,
+`RouteRegistry` add/remove routes), with `refresh.ts` and `index.ts` wiring it
+together. See [Routing and Caching](./routing-and-caching.md).
 
 Keep backend-aligned names across API and views: for example
 `src/api/module_system/user.ts` serves
-`src/views/module_system/user/index.vue`. Put components reused across features
-in the category-based `src/components/` tree; put page-only components under
-that view's `components/`. Put composables reused across the app in
+`src/views/module_system/user/index.vue`. There is one known, existing
+inconsistency to record as-is, not to "fix": the storage API layer lives under
+`src/api/module_storage/` while its views live under
+`src/views/module_task/storage/`. Match whichever side an existing feature
+already uses rather than renaming either tree. Put components reused across
+features in the category-based `src/components/` tree; put page-only components
+under that view's `components/`. Put composables reused across the app in
 `src/hooks/core/`; layout-only composables stay beside the layout, as in
 `src/layouts/fa-settings-panel/composables/`.
 

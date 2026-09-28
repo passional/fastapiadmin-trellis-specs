@@ -17,11 +17,21 @@ auth: Annotated[
 ]
 ```
 
-The established permission signature is
-`module_area:business:action`; generated examples include
+The established permission signature is `module_<area>:<resource>:<action>`;
+generated examples include
 `module_example:demo:{query,detail,create,update,delete,patch,export,import,download}`.
-The string must agree across the controller, menu/button records, session
-permission collection, Web directives/buttons, and generator templates.
+Backend code only ever uses the `module_` prefix (`module_system:dept:query`,
+`module_ai:chat:query`, `module_monitor:dashboard:query`); the older
+`sys:user:add` style examples are stale and must not be copied. The string must
+agree across the controller, menu/button records, session permission
+collection, Web directives/buttons, and generator templates.
+
+The Web button directive is `v-hasPerm`
+(`frontend/web/src/directives/permission/index.ts`). It accepts a single
+permission string or an array of strings, throws if given any other shape, and
+delegates the decision to `useAuth().hasAuth` (backend any-of semantics). When
+the check fails it removes the element from its parent; it is a UI convenience
+only and never replaces the server-side `AuthPermission` dependency.
 
 `AuthPermission` in `backend/app/core/dependencies.py` implements **any-of**
 semantics for a list, returns 403 when the authenticated non-superuser owns
@@ -63,7 +73,8 @@ Current limitations must remain visible:
 
 - `RoleDeptsModel` and its comment mention custom scope value `5`, but
   `Permission` implements only 1/2/3. Do not claim custom-department scope.
-- The live role query in `Permission._filter_by_data_scope` does not filter
+- The live role query in `Permission._load_user_data_scopes` (called by
+  `_filter_by_data_scope`) does not filter
   `RoleModel.status` or `RoleModel.is_deleted`. Disabled/soft-deleted associated
   roles can therefore still influence row scope, including an unfiltered
   `data_scope=3`; add status/deletion filters and regression cases before
@@ -96,10 +107,13 @@ Examples:
 - Explicit action permission: user list/detail/admin reset, file
   upload/download, operation-log detail/export.
 - Public by current controller definition: login/refresh/captcha,
-  registration, password-forget, OAuth callbacks, health routes/SSE.
-- Realtime: REST route dependencies do not protect a WebSocket; each endpoint
-  must call `_authenticate` before registering the connection or processing
-  messages.
+  registration, password-forget, OAuth callbacks, health routes/SSE
+  (`/monitor/health/check`, `/monitor/health/stream`).
+- Realtime: REST route dependencies do not protect a WebSocket; the AI chat
+  endpoint performs handshake authentication via `websocket_authenticate`
+  (4001 on auth failure, 4003 when the permission check fails) before accepting
+  the connection or processing messages. Storage transfer progress is SSE
+  (`/task/storage/transfer/stream`), authenticated per request.
 
 ## 5. Good / Base / Bad cases
 

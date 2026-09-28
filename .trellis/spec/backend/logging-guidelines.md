@@ -19,7 +19,7 @@ adding timestamps, module names, or correlation IDs to each message.
 - `debug`: high-volume diagnostic state useful during development; respect the
   configured logger level.
 - `info`: application lifecycle and successful subsystem initialization, as in
-  `backend/app/init_app.py`.
+  `backend/app/__init__.py:lifespan`.
 - `warning`: recoverable degradation, blocked requests, or malformed optional
   state. `RequestLogMiddleware` uses it for IP/demo-mode rejection.
 - `error`: a failed operation or handled infrastructure/domain failure that
@@ -57,13 +57,21 @@ unbounded response capture.
 
 Never intentionally add passwords, access/refresh tokens, authorization
 headers, storage credentials, private chat content, raw uploaded files, or
-secrets to ordinary logs. This is not yet fully enforced: the operation route
-captures non-file form/JSON requests and JSON responses without field
-redaction. Existing login/refresh/logout, AI model configuration, and system/AI
-chat write routes can therefore persist passwords, returned JWTs, refresh
-tokens, API keys, or message content in `sys_operation_log`. Fix or explicitly
-exclude/redact these paths before treating operation logs as safe; length-only
-replacement is not redaction.
+secrets to ordinary logs. The operation route already enforces this for
+structured fields: `_SENSITIVE_KEYS` / `_redact_sensitive()` replace matching
+keys with `******` in the request JSON body, in form fields, **and** in the JSON
+response body (`backend/app/core/router_class.py`), precisely because
+login/refresh responses carry access/refresh tokens. Keys covered include
+`password`/`old_password`/`new_password`/`confirm_password`, `token`/
+`access_token`/`refresh_token`, `api_key`/`apikey`, `secret`/
+`client_secret`/`secret_key`, `authorization`, and `captcha_key` (matching is
+case-insensitive and recursive through nested dict/list values).
+
+Redaction is key-based, so unstructured payloads still need care: a secret
+embedded in a free-text message body (for example AI chat content) has no
+recognizable key and is captured verbatim. Do not put credentials in free-text
+fields of a write route that the audit layer records. Length-only replacement
+is not redaction.
 
 Production handling suppresses `CustomException.data` and SQL diagnostic
 details; keep user-facing messages free of internal SQL and stack details.

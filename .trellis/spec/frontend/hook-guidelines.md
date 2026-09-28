@@ -38,6 +38,20 @@ listeners, timers, AbortControllers, sockets, and observers in the matching
 lifecycle. Hooks used by KeepAlive pages must consider both activated and
 deactivated states, as `useTable` does.
 
+For a page kept alive by the route cache, `onUnmounted` fires only when the
+instance is evicted — it is **not** the sole cleanup point. Pages that own a
+WebSocket, timers, or global listeners must implement `onActivated`/`onDeactivated`:
+release the resource on deactivate and restore it on activate, as
+`frontend/web/src/views/module_ai/chat/index.vue` does. A cached-but-deactivated
+page stays alive, so a missing `onDeactivated` leaks its connection.
+
+When guarding a WebSocket connection, cover the handshake phase:
+`if (ws && ws.readyState !== WebSocket.CLOSED) return` (blocking only `OPEN` leaks
+re-entries while `CONNECTING`). Before an intentional `close()`, detach
+`onopen`/`onmessage`/`onerror`/`onclose` first so close-race callbacks cannot fire
+toasts or state updates. See [Routing and Caching](./routing-and-caching.md) for
+the full contract.
+
 ## App patterns
 
 `frontend/app/src/composables/useListPage.ts` is the standard paginated-list

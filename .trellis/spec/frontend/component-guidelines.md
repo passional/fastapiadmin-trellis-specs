@@ -7,6 +7,12 @@ Use Vue 3 Composition API and TypeScript SFCs. Existing components put
 state in `computed`, and clean up listeners/connections on unmount. Name routed
 or keep-alive components explicitly with `defineOptions({ name: ... })`.
 
+For a routed Web page the name is a contract, not a label: `KeepAlive` and the
+worktab cache match by **component name**, so `defineOptions({ name })` **must
+equal the backend menu's `route_name`**. If they differ, `include`/`exclude`
+silently miss the page and neither caching nor eviction works. See
+[Routing and Caching](./routing-and-caching.md).
+
 For reusable contracts:
 
 - Define a local `Props` interface and use
