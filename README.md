@@ -4,15 +4,21 @@ FastAPI Admin 项目的 Trellis 工程规范模板库。
 
 ## 目录结构
 
-spec 位于 `.trellis/spec/`，按层组织：
+spec 位于 `.trellis/spec/`，按层组织（24 份）：
 
-- `architecture/` — 系统边界、HTTP/Realtime 契约、代码生成与路由
-- `backend/` — 目录结构、错误处理、数据库、日志、质量
-- `frontend/` — 目录结构、组件、hook、状态管理、类型安全、路由与缓存、质量
+- `index.md` — 总入口：权威来源排序、层路由、命令速查、已知漂移
+- `project/` — 跨端工程规则：协作红线、开发流程与命令、测试规范、dist 产物与部署备份
+- `backend/` — 目录结构、接口与分层契约、数据库、错误处理、日志、质量
+- `frontend/` — 目录结构、API 与类型、组件、CRUD 套件、状态与路由、KeepAlive 与连接、质量
 - `guides/` — 跨层 / 代码复用思考指南
-- `operations/` — 配置与启动、部署拓扑
-- `security/` — 认证与密钥、授权与数据范围、非可信内容与审计
-- `testing/` — 后端 / 前端 / 契约与部署测试
+
+## 本次刷新（2026-11-17）
+
+- **来源**：`passional/xian-news`（FastapiAdmin 派生仓库）commit `2e477fe8`。以该仓库根目录 `SKILL.md` 为最高权威，全部规则对照真实代码核验；前端工程契约引用 `docs/UI-ENGINEERING-SPEC.md` 与 `docs/DESIGN-SPEC.md`，不复制成两套说法。
+- **结构由旧 7 层收敛为 4 层**：旧 `architecture/`、`operations/`、`security/`、`testing/` 四层（15 份）**未合并进新树**，完整保留在分支 `archive/pre-overwrite-2026-11-17`（commit `5f686a4d`），需要时从该分支取回。
+- 文件对应关系：旧 `frontend/{hook-guidelines,state-management,type-safety,routing-and-caching}.md` → 新 `frontend/{crud-hooks,state-and-routing,api-and-types,keepalive-and-connections}.md`；新增 `backend/api-conventions.md` 与 `project/` 整层。
+- ⚠️ **部分事实是派生仓库的本地口径**（后端端口 8003 而非默认 8001、覆盖文档为 `docs/COVERAGE-PLAN.md`、演示模式是系统参数 `demo_enable`、`data_scope` 实现为 1/2/3、`plugin.toml` 在域根、权限标识存在四段式）。spec 内已逐条标注漂移；导入其它 FastapiAdmin 项目时请按该项目代码核对，不要直接当通用默认值。
+- **下游同步**：层分类变化较大，建议先看 diff 再 `trellis update`；本地已改的 spec 会进冲突流程，要强制对齐用 `trellis update -f`。
 
 ## 用法（在目标 FastAPI Admin 项目导入）
 
